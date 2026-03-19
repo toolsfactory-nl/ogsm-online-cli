@@ -60,7 +60,7 @@ when "list"
   puts JSON.generate(actions)
 
 when "create"
-  opts = { canvas_id: CANVAS_ID }
+  opts = { canvas_id: CANVAS_ID, list: "todo" }
   OptionParser.new do |o|
     o.on("--title TITLE")       { |v| opts[:title]       = v }
     o.on("--strategy-id ID")    { |v| opts[:strategy_id] = v }
