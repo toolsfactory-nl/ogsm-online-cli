@@ -4,21 +4,20 @@
 require "net/http"
 require "json"
 require "optparse"
+require "uri"
 
 # --- Config ---------------------------------------------------------------
 
-# Parse manually to support special characters in passwords (%, ^, etc.)
-raw = ENV.fetch("OGSM_URL")
-m = raw.match(%r{\A(https?)://([^:]+):(.+)@([^/:]+)(?::(\d+))?(/.*)?\z})
-abort "Invalid OGSM_URL — expected https://user:pass@host/api/v2/ogsm_canvases/ID" unless m
+uri     = URI.parse(ENV.fetch("OGSM_URL"))
+params  = URI.decode_www_form(uri.query.to_s).to_h
 
-scheme, user, password, host, port, path = m.captures
-HOST      = host
-PORT      = (port || (scheme == "https" ? "443" : "80")).to_i
-USE_SSL   = scheme == "https"
-USERNAME  = user
-PASSWORD  = password
-CANVAS_ID = path.to_s.split("/").last
+HOST      = uri.host
+PORT      = uri.port || (uri.scheme == "https" ? 443 : 80)
+USE_SSL   = uri.scheme == "https"
+USERNAME  = uri.user
+PASSWORD  = URI.decode_www_form_component(uri.password.to_s)
+CANVAS_ID = params["canvas_id"] or abort "OGSM_URL missing canvas_id param"
+USER_ID   = params["user_id"]  or abort "OGSM_URL missing user_id param"
 
 # --- HTTP helpers ---------------------------------------------------------
 
@@ -59,16 +58,15 @@ when "create"
   opts = { canvas_id: CANVAS_ID }
   OptionParser.new do |o|
     o.on("--title TITLE")       { |v| opts[:title]       = v }
-    o.on("--creator-id ID")     { |v| opts[:creator_id]  = v }
     o.on("--strategy-id ID")    { |v| opts[:strategy_id] = v }
     o.on("--due DATE")          { |v| opts[:due]         = v }
     o.on("--start DATE")        { |v| opts[:start]       = v }
     o.on("--list STATUS")       { |v| opts[:list]        = v }
   end.parse!(ARGV)
 
-  abort "--title and --creator-id are required" unless opts[:title] && opts[:creator_id]
+  abort "--title is required" unless opts[:title]
 
-  body = { canvas: { id: opts[:canvas_id] }, creator: { id: opts[:creator_id] }, title: opts[:title] }
+  body = { canvas: { id: opts[:canvas_id] }, creator: { id: USER_ID }, title: opts[:title] }
   body[:strategy] = { id: opts[:strategy_id] } if opts[:strategy_id]
   body[:due]      = opts[:due]   if opts[:due]
   body[:start]    = opts[:start] if opts[:start]
@@ -81,15 +79,12 @@ when "update"
   action_id = ARGV.shift or abort "Usage: ogsm-actions update ACTION_ID [options]"
   opts = {}
   OptionParser.new do |o|
-    o.on("--updater-id ID")  { |v| opts[:updater_id] = v }
-    o.on("--title TITLE")    { |v| opts[:title]      = v }
-    o.on("--due DATE")       { |v| opts[:due]        = v }
-    o.on("--list STATUS")    { |v| opts[:list]       = v }
+    o.on("--title TITLE")    { |v| opts[:title] = v }
+    o.on("--due DATE")       { |v| opts[:due]   = v }
+    o.on("--list STATUS")    { |v| opts[:list]  = v }
   end.parse!(ARGV)
 
-  abort "--updater-id is required" unless opts[:updater_id]
-
-  body = { updater: { id: opts[:updater_id] } }
+  body = { updater: { id: USER_ID } }
   body[:title] = opts[:title] if opts[:title]
   body[:due]   = opts[:due]   if opts[:due]
   body[:list]  = opts[:list]  if opts[:list]
@@ -101,9 +96,9 @@ else
   abort <<~USAGE
     Usage:
       ogsm-actions list
-      ogsm-actions create --title TITLE --creator-id ID [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
-      ogsm-actions update ACTION_ID --updater-id ID [--title TITLE] [--due DATE] [--list STATUS]
+      ogsm-actions create --title TITLE [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
+      ogsm-actions update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
 
-    Configure via OGSM_URL=https://user:pass@host/api/v2/ogsm_canvases/CANVAS_ID
+    Configure via OGSM_URL=https://user:pass@host/?canvas_id=CANVAS_ID&user_id=USER_ID
   USAGE
 end
