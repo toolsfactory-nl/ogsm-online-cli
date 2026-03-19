@@ -62,20 +62,24 @@ when "list"
 when "create"
   opts = { canvas_id: CANVAS_ID, list: "todo" }
   OptionParser.new do |o|
-    o.on("--title TITLE")       { |v| opts[:title]       = v }
-    o.on("--strategy-id ID")    { |v| opts[:strategy_id] = v }
-    o.on("--due DATE")          { |v| opts[:due]         = v }
-    o.on("--start DATE")        { |v| opts[:start]       = v }
-    o.on("--list STATUS")       { |v| opts[:list]        = v }
+    o.on("--title TITLE")       { |v| opts[:title]            = v }
+    o.on("--strategy-id ID")    { |v| opts[:strategy_id]      = v }
+    o.on("--due DATE")          { |v| opts[:due]              = v }
+    o.on("--start DATE")        { |v| opts[:start]            = v }
+    o.on("--list STATUS")       { |v| opts[:list]             = v }
+    o.on("--assignee USER_ID")  { |v| opts[:assignee_id] = v }
+    o.on("--labels LABELS")     { |v| opts[:label_ids]  = v.split(",") }
   end.parse!(ARGV)
 
   abort "--title is required" unless opts[:title]
 
   body = { canvas: { id: opts[:canvas_id] }, creator: { id: USER_ID }, title: opts[:title] }
-  body[:strategy] = { id: opts[:strategy_id] } if opts[:strategy_id]
-  body[:due]      = opts[:due]   if opts[:due]
-  body[:start]    = opts[:start] if opts[:start]
-  body[:list]     = opts[:list]  if opts[:list]
+  body[:strategy]    = { id: opts[:strategy_id] } if opts[:strategy_id]
+  body[:due]         = opts[:due]         if opts[:due]
+  body[:start]       = opts[:start]       if opts[:start]
+  body[:list]        = opts[:list]        if opts[:list]
+  body[:assignee_id] = opts[:assignee_id] if opts[:assignee_id]
+  body[:label_ids]   = opts[:label_ids]   if opts[:label_ids]
 
   action = ok!(post("actions.json", { ogsm_action: body }))
   puts "Created #{action["id"]}: #{action["title"]}"
@@ -84,15 +88,19 @@ when "update"
   action_id = ARGV.shift or abort "Usage: ogsm-actions update ACTION_ID [options]"
   opts = {}
   OptionParser.new do |o|
-    o.on("--title TITLE")    { |v| opts[:title] = v }
-    o.on("--due DATE")       { |v| opts[:due]   = v }
-    o.on("--list STATUS")    { |v| opts[:list]  = v }
+    o.on("--title TITLE")       { |v| opts[:title]            = v }
+    o.on("--due DATE")          { |v| opts[:due]              = v }
+    o.on("--list STATUS")       { |v| opts[:list]             = v }
+    o.on("--assignee USER_ID")  { |v| opts[:assignee_id] = v }
+    o.on("--labels LABELS")     { |v| opts[:label_ids]  = v.split(",") }
   end.parse!(ARGV)
 
   body = { updater: { id: USER_ID } }
-  body[:title] = opts[:title] if opts[:title]
-  body[:due]   = opts[:due]   if opts[:due]
-  body[:list]  = opts[:list]  if opts[:list]
+  body[:title]       = opts[:title]       if opts[:title]
+  body[:due]         = opts[:due]         if opts[:due]
+  body[:list]        = opts[:list]        if opts[:list]
+  body[:assignee_id] = opts[:assignee_id] if opts[:assignee_id]
+  body[:label_ids]   = opts[:label_ids]   if opts[:label_ids]
 
   action = ok!(patch("actions/#{action_id}.json", { ogsm_action: body }))
   puts "Updated #{action["id"]}: #{action["title"]}"
@@ -102,7 +110,9 @@ else
     Usage:
       ogsm-actions list
       ogsm-actions create --title TITLE [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
+                          [--assignee USER_ID] [--labels "name1,name2"]
       ogsm-actions update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
+                          [--assignee USER_ID] [--labels "name1,name2"]
 
     Configure via OGSM_URL=https://user:pass@host/?canvas_id=CANVAS_ID&user_id=USER_ID
   USAGE
