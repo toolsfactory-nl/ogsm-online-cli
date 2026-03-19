@@ -8,14 +8,19 @@ require "uri"
 
 # --- Config ---------------------------------------------------------------
 
-uri     = URI.parse(ENV.fetch("OGSM_URL"))
-params  = URI.decode_www_form(uri.query.to_s).to_h
+# URI.parse rejects unencoded special chars (%, ^) in passwords, so parse manually.
+raw = ENV.fetch("OGSM_URL")
+m = raw.match(%r{\A(https?)://([^:]+):(.+)@([^/:?]+)(?::(\d+))?(?:/[^?]*)?\??(.*)\z})
+abort "Invalid OGSM_URL — expected https://user:pass@host/?canvas_id=ID&user_id=ID" unless m
 
-HOST      = uri.host
-PORT      = uri.port || (uri.scheme == "https" ? 443 : 80)
-USE_SSL   = uri.scheme == "https"
-USERNAME  = uri.user
-PASSWORD  = URI.decode_www_form_component(uri.password.to_s)
+scheme, user, password, host, port, query = m.captures
+params = URI.decode_www_form(query.to_s).to_h
+
+HOST      = host
+PORT      = (port || (scheme == "https" ? "443" : "80")).to_i
+USE_SSL   = scheme == "https"
+USERNAME  = user
+PASSWORD  = password
 CANVAS_ID = params["canvas_id"] or abort "OGSM_URL missing canvas_id param"
 USER_ID   = params["user_id"]  or abort "OGSM_URL missing user_id param"
 
