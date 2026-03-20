@@ -16,13 +16,13 @@ abort "Invalid OGSM_URL — expected https://user:pass@host/?canvas_id=ID&user_i
 scheme, user, password, host, port, query = m.captures
 params = URI.decode_www_form(query.to_s).to_h
 
-HOST      = host
-PORT      = (port || (scheme == "https" ? "443" : "80")).to_i
-USE_SSL   = scheme == "https"
-USERNAME  = user
-PASSWORD  = password
+HOST = host
+PORT = (port || ((scheme == "https") ? "443" : "80")).to_i
+USE_SSL = scheme == "https"
+USERNAME = user
+PASSWORD = password
 CANVAS_ID = params["canvas_id"] or abort "OGSM_URL missing canvas_id param"
-USER_ID   = params["user_id"]  or abort "OGSM_URL missing user_id param"
+USER_ID = params["user_id"] or abort "OGSM_URL missing user_id param"
 
 # --- HTTP helpers ---------------------------------------------------------
 
@@ -38,8 +38,8 @@ def request(method_class, path, body: nil)
   end
 end
 
-def get(path)         = request(Net::HTTP::Get,   path)
-def post(path, body)  = request(Net::HTTP::Post,  path, body:)
+def get(path) = request(Net::HTTP::Get, path)
+def post(path, body) = request(Net::HTTP::Post, path, body:)
 def patch(path, body) = request(Net::HTTP::Patch, path, body:)
 
 def ok!(res)
@@ -60,50 +60,80 @@ when "list"
   puts JSON.generate(actions)
 
 when "create"
-  opts = { canvas_id: CANVAS_ID, list: "todo" }
+  opts = {canvas_id: CANVAS_ID, list: "todo"}
   OptionParser.new do |o|
-    o.on("--title TITLE")       { |v| opts[:title]            = v }
-    o.on("--strategy-id ID")    { |v| opts[:strategy_id]      = v }
-    o.on("--due DATE")          { |v| opts[:due]              = v }
-    o.on("--start DATE")        { |v| opts[:start]            = v }
-    o.on("--list STATUS")       { |v| opts[:list]             = v }
-    o.on("--assignee USER_ID")  { |v| opts[:assignee_id] = v }
-    o.on("--labels LABELS")     { |v| opts[:label_ids]  = v.split(",") }
+    o.on("--title TITLE") { |v| opts[:title] = v }
+    o.on("--strategy-id ID") { |v| opts[:strategy_id] = v }
+    o.on("--due DATE") { |v| opts[:due] = v }
+    o.on("--start DATE") { |v| opts[:start] = v }
+    o.on("--list STATUS") { |v| opts[:list] = v }
+    o.on("--assignee USER_ID") { |v| opts[:assignee_id] = v }
+    o.on("--labels LABELS") { |v| opts[:label_ids] = v.split(",") }
   end.parse!(ARGV)
 
   abort "--title is required" unless opts[:title]
 
-  body = { canvas: { id: opts[:canvas_id] }, creator: { id: USER_ID }, title: opts[:title] }
-  body[:strategy]    = { id: opts[:strategy_id] } if opts[:strategy_id]
-  body[:due]         = opts[:due]         if opts[:due]
-  body[:start]       = opts[:start]       if opts[:start]
-  body[:list]        = opts[:list]        if opts[:list]
+  body = {canvas: {id: opts[:canvas_id]}, creator: {id: USER_ID}, title: opts[:title]}
+  body[:strategy] = {id: opts[:strategy_id]} if opts[:strategy_id]
+  body[:due] = opts[:due] if opts[:due]
+  body[:start] = opts[:start] if opts[:start]
+  body[:list] = opts[:list] if opts[:list]
   body[:assignee_id] = opts[:assignee_id] if opts[:assignee_id]
-  body[:label_ids]   = opts[:label_ids]   if opts[:label_ids]
+  body[:label_ids] = opts[:label_ids] if opts[:label_ids]
 
-  action = ok!(post("actions.json", { ogsm_action: body }))
+  action = ok!(post("actions.json", {ogsm_action: body}))
   puts "Created #{action["id"]}: #{action["title"]}"
 
 when "update"
   action_id = ARGV.shift or abort "Usage: ogsm-actions update ACTION_ID [options]"
   opts = {}
   OptionParser.new do |o|
-    o.on("--title TITLE")       { |v| opts[:title]            = v }
-    o.on("--due DATE")          { |v| opts[:due]              = v }
-    o.on("--list STATUS")       { |v| opts[:list]             = v }
-    o.on("--assignee USER_ID")  { |v| opts[:assignee_id] = v }
-    o.on("--labels LABELS")     { |v| opts[:label_ids]  = v.split(",") }
+    o.on("--title TITLE") { |v| opts[:title] = v }
+    o.on("--due DATE") { |v| opts[:due] = v }
+    o.on("--list STATUS") { |v| opts[:list] = v }
+    o.on("--assignee USER_ID") { |v| opts[:assignee_id] = v }
+    o.on("--labels LABELS") { |v| opts[:label_ids] = v.split(",") }
   end.parse!(ARGV)
 
-  body = { updater: { id: USER_ID } }
-  body[:title]       = opts[:title]       if opts[:title]
-  body[:due]         = opts[:due]         if opts[:due]
-  body[:list]        = opts[:list]        if opts[:list]
+  body = {updater: {id: USER_ID}}
+  body[:title] = opts[:title] if opts[:title]
+  body[:due] = opts[:due] if opts[:due]
+  body[:list] = opts[:list] if opts[:list]
   body[:assignee_id] = opts[:assignee_id] if opts[:assignee_id]
-  body[:label_ids]   = opts[:label_ids]   if opts[:label_ids]
+  body[:label_ids] = opts[:label_ids] if opts[:label_ids]
 
-  action = ok!(patch("actions/#{action_id}.json", { ogsm_action: body }))
+  action = ok!(patch("actions/#{action_id}.json", {ogsm_action: body}))
   puts "Updated #{action["id"]}: #{action["title"]}"
+
+when "comments"
+  action_id = ARGV.shift or abort "Usage: ogsm-actions comments ACTION_ID"
+  comments = ok!(get("actions/#{action_id}/comments.json"))
+  puts JSON.generate(comments)
+
+when "comment-create"
+  action_id = ARGV.shift or abort "Usage: ogsm-actions comment-create ACTION_ID --content CONTENT"
+  opts = {}
+  OptionParser.new do |o|
+    o.on("--content CONTENT") { |v| opts[:content] = v }
+  end.parse!(ARGV)
+
+  abort "--content is required" unless opts[:content]
+
+  comment = ok!(post("actions/#{action_id}/comments.json", {comment: {user: {id: USER_ID}, content: opts[:content]}}))
+  puts "Created #{comment["id"]}: #{comment["content"]}"
+
+when "comment-update"
+  action_id = ARGV.shift or abort "Usage: ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT"
+  comment_id = ARGV.shift or abort "Usage: ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT"
+  opts = {}
+  OptionParser.new do |o|
+    o.on("--content CONTENT") { |v| opts[:content] = v }
+  end.parse!(ARGV)
+
+  abort "--content is required" unless opts[:content]
+
+  comment = ok!(patch("actions/#{action_id}/comments/#{comment_id}.json", {comment: {user: {id: USER_ID}, content: opts[:content]}}))
+  puts "Updated #{comment["id"]}: #{comment["content"]}"
 
 else
   abort <<~USAGE
@@ -113,6 +143,9 @@ else
                           [--assignee USER_ID] [--labels "name1,name2"]
       ogsm-actions update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
                           [--assignee USER_ID] [--labels "name1,name2"]
+      ogsm-actions comments ACTION_ID
+      ogsm-actions comment-create ACTION_ID --content CONTENT
+      ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT
 
     Configure via OGSM_URL=https://user:pass@host/?canvas_id=CANVAS_ID&user_id=USER_ID
   USAGE
