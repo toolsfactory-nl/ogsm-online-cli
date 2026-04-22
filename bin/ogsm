@@ -5,31 +5,104 @@ require "net/http"
 require "json"
 require "optparse"
 require "uri"
+require "io/console"
+require "fileutils"
 
-# --- Config ---------------------------------------------------------------
+# --- Paths ----------------------------------------------------------------
 
-# URI.parse rejects unencoded special chars (%, ^) in passwords, so parse manually.
-raw = ENV.fetch("OGSM_URL")
-m = raw.match(%r{\A(https?)://([^:]+):(.+)@([^/:?]+)(?::(\d+))?(?:/[^?]*)?\??(.*)\z})
-abort "Invalid OGSM_URL — expected https://user:pass@host/?canvas_id=ID&user_id=ID" unless m
+CONFIG_DIR = File.join(ENV["XDG_CONFIG_HOME"] || File.join(Dir.home, ".config"), "ogsm-online")
+CREDENTIALS_FILE = File.join(CONFIG_DIR, "credentials.json")
+SETTINGS_FILE = File.join(CONFIG_DIR, "settings.json")
 
-scheme, user, password, host, port, query = m.captures
-params = URI.decode_www_form(query.to_s).to_h
+# --- Global option parsing ------------------------------------------------
 
-HOST = host
-PORT = (port || ((scheme == "https") ? "443" : "80")).to_i
-USE_SSL = scheme == "https"
-USERNAME = user
-PASSWORD = password
-CANVAS_ID = params["canvas_id"] or abort "OGSM_URL missing canvas_id param"
-USER_ID = params["user_id"] or abort "OGSM_URL missing user_id param"
+url_arg = nil
+canvas_id_arg = nil
+OptionParser.new do |o|
+  o.on("--url URL", "Tenant URL (e.g. tenant.ogsm.online or http://localhost:8350)") { |v| url_arg = v }
+  o.on("--canvas-id ID", "Canvas UUID for list/create commands") { |v| canvas_id_arg = v }
+end.order!(ARGV)
 
-# --- HTTP helpers ---------------------------------------------------------
+# --- Settings (url + canvas_id) ------------------------------------------
 
-def request(method_class, path, body: nil)
+def load_settings
+  return {} unless File.exist?(SETTINGS_FILE)
+  JSON.parse(File.read(SETTINGS_FILE))
+rescue JSON::ParserError
+  {}
+end
+
+def save_settings(settings)
+  FileUtils.mkdir_p(CONFIG_DIR, mode: 0o700)
+  File.write(SETTINGS_FILE, JSON.pretty_generate(settings))
+end
+
+def normalise_url(value)
+  uri = URI.parse(value.include?("://") ? value : "https://#{value}")
+  abort "Invalid --url: #{value}" unless uri.is_a?(URI::HTTP) && uri.host
+  port_part = (uri.port && uri.port != uri.default_port) ? ":#{uri.port}" : ""
+  "#{uri.scheme}://#{uri.host}#{port_part}"
+end
+
+def resolve_settings(url_arg, canvas_id_arg)
+  settings = load_settings
+  url = url_arg ? normalise_url(url_arg) : settings["url"]
+  canvas_id = canvas_id_arg || settings["canvas_id"]
+  abort "No url known — pass --url=tenant.ogsm.online at least once" if url.nil?
+
+  updated = {"url" => url}
+  updated["canvas_id"] = canvas_id if canvas_id
+  save_settings(updated) unless settings == updated
+
+  [URI.parse(url), canvas_id]
+end
+
+URI_OBJECT, CANVAS_ID = resolve_settings(url_arg, canvas_id_arg)
+HOST = URI_OBJECT.host
+PORT = URI_OBJECT.port || ((URI_OBJECT.scheme == "https") ? 443 : 80)
+USE_SSL = URI_OBJECT.scheme == "https"
+
+# --- Token storage --------------------------------------------------------
+
+def load_credentials
+  return {} unless File.exist?(CREDENTIALS_FILE)
+  JSON.parse(File.read(CREDENTIALS_FILE))
+rescue JSON::ParserError
+  {}
+end
+
+def save_credentials(creds)
+  FileUtils.mkdir_p(CONFIG_DIR, mode: 0o700)
+  File.open(CREDENTIALS_FILE, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |f|
+    f.write(JSON.pretty_generate(creds))
+  end
+end
+
+def stored_token
+  return ENV["OGSM_TOKEN"] if ENV["OGSM_TOKEN"]
+  load_credentials.dig(HOST, "token")
+end
+
+def store_token(token)
+  return if ENV["OGSM_TOKEN"]
+  creds = load_credentials
+  creds[HOST] = {"token" => token}
+  save_credentials(creds)
+end
+
+def clear_token
+  return if ENV["OGSM_TOKEN"]
+  creds = load_credentials
+  creds.delete(HOST)
+  save_credentials(creds)
+end
+
+# --- HTTP layer -----------------------------------------------------------
+
+def http_request(method_class, path, body: nil, token: stored_token)
   Net::HTTP.start(HOST, PORT, use_ssl: USE_SSL) do |http|
     req = method_class.new("/api/v2/#{path}")
-    req.basic_auth USERNAME, PASSWORD
+    req["Authorization"] = "Bearer #{token}" if token
     if body
       req.content_type = "application/json"
       req.body = JSON.generate(body)
@@ -38,8 +111,22 @@ def request(method_class, path, body: nil)
   end
 end
 
+def request(method_class, path, body: nil)
+  ensure_token!
+  res = http_request(method_class, path, body: body)
+  if res.code.to_i == 401
+    warn "Authentication failed; logging in again."
+    clear_token
+    ensure_token!
+    res = http_request(method_class, path, body: body)
+  end
+  res
+end
+
 def get(path) = request(Net::HTTP::Get, path)
+
 def post(path, body) = request(Net::HTTP::Post, path, body:)
+
 def patch(path, body) = request(Net::HTTP::Patch, path, body:)
 
 def ok!(res)
@@ -49,17 +136,77 @@ def ok!(res)
   JSON.parse(res.body)
 end
 
+# --- Login ----------------------------------------------------------------
+
+def prompt(label)
+  $stderr.print(label)
+  $stdin.gets&.chomp
+end
+
+def prompt_secret(label)
+  $stderr.print(label)
+  result = $stdin.noecho(&:gets)&.chomp
+  $stderr.puts
+  result
+end
+
+def ensure_token!
+  return if stored_token
+
+  warn "Logging in to #{HOST}"
+  email = prompt("Email: ")
+  password = prompt_secret("Password: ")
+  abort "Email and password are required" if email.to_s.empty? || password.to_s.empty?
+
+  body = {email_address: email, password: password}
+  loop do
+    res = http_request(Net::HTTP::Post, "session.json", body: body, token: nil)
+    case res.code.to_i
+    when 200
+      data = JSON.parse(res.body)
+      store_token(data["token"])
+      warn "Logged in as #{data.dig("user", "email_address")}"
+      return
+    when 401
+      reason = (begin
+        JSON.parse(res.body)["error"]
+      rescue
+        nil
+      end)
+      if reason == "otp_required"
+        body[:otp] = prompt("OTP code: ")
+        next
+      end
+      abort "Login failed: invalid credentials"
+    when 429
+      abort "Login failed: rate limited"
+    else
+      abort "Login failed (#{res.code}): #{res.body}"
+    end
+  end
+end
+
 # --- Commands -------------------------------------------------------------
 
 command = ARGV.shift
 
 case command
 
+when "login"
+  clear_token
+  ensure_token!
+
+when "logout"
+  clear_token
+  warn "Removed stored credentials for #{HOST}"
+
 when "list"
+  abort "No canvas_id known — pass --canvas-id=ID at least once" unless CANVAS_ID
   actions = ok!(get("actions.json?canvas_id=#{CANVAS_ID}"))
   puts JSON.generate(actions)
 
 when "create"
+  abort "No canvas_id known — pass --canvas-id=ID at least once" unless CANVAS_ID
   opts = {canvas_id: CANVAS_ID, list: "todo"}
   OptionParser.new do |o|
     o.on("--title TITLE") { |v| opts[:title] = v }
@@ -73,7 +220,7 @@ when "create"
 
   abort "--title is required" unless opts[:title]
 
-  body = {canvas: {id: opts[:canvas_id]}, creator: {id: USER_ID}, title: opts[:title]}
+  body = {canvas: {id: opts[:canvas_id]}, title: opts[:title]}
   body[:strategy] = {id: opts[:strategy_id]} if opts[:strategy_id]
   body[:due] = opts[:due] if opts[:due]
   body[:start] = opts[:start] if opts[:start]
@@ -95,7 +242,7 @@ when "update"
     o.on("--labels LABELS") { |v| opts[:label_ids] = v.split(",") }
   end.parse!(ARGV)
 
-  body = {updater: {id: USER_ID}}
+  body = {}
   body[:title] = opts[:title] if opts[:title]
   body[:due] = opts[:due] if opts[:due]
   body[:list] = opts[:list] if opts[:list]
@@ -119,7 +266,7 @@ when "comment-create"
 
   abort "--content is required" unless opts[:content]
 
-  comment = ok!(post("actions/#{action_id}/comments.json", {comment: {user: {id: USER_ID}, content: opts[:content]}}))
+  comment = ok!(post("actions/#{action_id}/comments.json", {comment: {content: opts[:content]}}))
   puts "Created #{comment["id"]}: #{comment["content"]}"
 
 when "comment-update"
@@ -132,21 +279,29 @@ when "comment-update"
 
   abort "--content is required" unless opts[:content]
 
-  comment = ok!(patch("actions/#{action_id}/comments/#{comment_id}.json", {comment: {user: {id: USER_ID}, content: opts[:content]}}))
+  comment = ok!(patch("actions/#{action_id}/comments/#{comment_id}.json", {comment: {content: opts[:content]}}))
   puts "Updated #{comment["id"]}: #{comment["content"]}"
 
 else
   abort <<~USAGE
     Usage:
-      ogsm-actions list
-      ogsm-actions create --title TITLE [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
-                          [--assignee USER_ID] [--labels "name1,name2"]
-      ogsm-actions update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
-                          [--assignee USER_ID] [--labels "name1,name2"]
-      ogsm-actions comments ACTION_ID
-      ogsm-actions comment-create ACTION_ID --content CONTENT
-      ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT
+      ogsm-actions [--url=URL] [--canvas-id=ID] COMMAND [options]
 
-    Configure via OGSM_URL=https://user:pass@host/?canvas_id=CANVAS_ID&user_id=USER_ID
+    Commands:
+      login
+      logout
+      list
+      create --title TITLE [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
+             [--assignee USER_ID] [--labels "name1,name2"]
+      update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
+             [--assignee USER_ID] [--labels "name1,name2"]
+      comments ACTION_ID
+      comment-create ACTION_ID --content CONTENT
+      comment-update ACTION_ID COMMENT_ID --content CONTENT
+
+    --url accepts a hostname (assumes HTTPS) or a full URL such as http://localhost:8350.
+    On first use, pass --url (and --canvas-id if needed); both are persisted to
+    $XDG_CONFIG_HOME/ogsm-online/settings.json. Credentials live alongside in
+    credentials.json (mode 0600); set OGSM_TOKEN to override the stored token.
   USAGE
 end
