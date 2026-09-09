@@ -205,6 +205,10 @@ when "list"
   actions = ok!(get("actions.json?canvas_id=#{CANVAS_ID}"))
   puts JSON.generate(actions)
 
+when "statuses"
+  statuses = ok!(get("statuses.json"))
+  puts JSON.generate(statuses)
+
 when "create"
   abort "No canvas_id known — pass --canvas-id=ID at least once" unless CANVAS_ID
   opts = {canvas_id: CANVAS_ID, list: "todo"}
@@ -291,10 +295,14 @@ else
       login
       logout
       list
+      statuses
       create --title TITLE [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
       update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
+
+    --list takes a status id, name or base list key ("backlog", "todo", "doing", "done");
+    run "statuses" to see the statuses this environment uses.
       comments ACTION_ID
       comment-create ACTION_ID --content CONTENT
       comment-update ACTION_ID COMMENT_ID --content CONTENT
