@@ -214,6 +214,7 @@ when "create"
   opts = {canvas_id: CANVAS_ID, list: "todo"}
   OptionParser.new do |o|
     o.on("--title TITLE") { |v| opts[:title] = v }
+    o.on("--description TEXT") { |v| opts[:description] = v }
     o.on("--strategy-id ID") { |v| opts[:strategy_id] = v }
     o.on("--due DATE") { |v| opts[:due] = v }
     o.on("--start DATE") { |v| opts[:start] = v }
@@ -225,6 +226,7 @@ when "create"
   abort "--title is required" unless opts[:title]
 
   body = {canvas: {id: opts[:canvas_id]}, title: opts[:title]}
+  body[:description] = opts[:description] if opts[:description]
   body[:strategy] = {id: opts[:strategy_id]} if opts[:strategy_id]
   body[:due] = opts[:due] if opts[:due]
   body[:start] = opts[:start] if opts[:start]
@@ -240,6 +242,7 @@ when "update"
   opts = {}
   OptionParser.new do |o|
     o.on("--title TITLE") { |v| opts[:title] = v }
+    o.on("--description TEXT") { |v| opts[:description] = v }
     o.on("--due DATE") { |v| opts[:due] = v }
     o.on("--list STATUS") { |v| opts[:list] = v }
     o.on("--assignee USER_ID") { |v| opts[:assignee_id] = v }
@@ -248,6 +251,7 @@ when "update"
 
   body = {}
   body[:title] = opts[:title] if opts[:title]
+  body[:description] = opts[:description] if opts[:description]
   body[:due] = opts[:due] if opts[:due]
   body[:list] = opts[:list] if opts[:list]
   body[:assignee_id] = opts[:assignee_id] if opts[:assignee_id]
@@ -296,9 +300,9 @@ else
       logout
       list
       statuses
-      create --title TITLE [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
+      create --title TITLE [--description TEXT] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
-      update ACTION_ID [--title TITLE] [--due DATE] [--list STATUS]
+      update ACTION_ID [--title TITLE] [--description TEXT] [--due DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
 
     --list takes a status id, name or base list key ("backlog", "todo", "doing", "done");
