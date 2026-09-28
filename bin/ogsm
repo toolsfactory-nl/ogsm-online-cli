@@ -17,13 +17,11 @@ SETTINGS_FILE = File.join(CONFIG_DIR, "settings.json")
 # --- Global option parsing ------------------------------------------------
 
 url_arg = nil
-canvas_id_arg = nil
 OptionParser.new do |o|
   o.on("--url URL", "Tenant URL (e.g. tenant.ogsm.online or http://localhost:8350)") { |v| url_arg = v }
-  o.on("--canvas-id ID", "Canvas UUID for list/create commands") { |v| canvas_id_arg = v }
 end.order!(ARGV)
 
-# --- Settings (url + canvas_id) ------------------------------------------
+# --- Settings (url) -------------------------------------------------------
 
 def load_settings
   return {} unless File.exist?(SETTINGS_FILE)
@@ -44,20 +42,18 @@ def normalise_url(value)
   "#{uri.scheme}://#{uri.host}#{port_part}"
 end
 
-def resolve_settings(url_arg, canvas_id_arg)
+def resolve_url(url_arg)
   settings = load_settings
   url = url_arg ? normalise_url(url_arg) : settings["url"]
-  canvas_id = canvas_id_arg || settings["canvas_id"]
   abort "No url known — pass --url=tenant.ogsm.online at least once" if url.nil?
 
   updated = {"url" => url}
-  updated["canvas_id"] = canvas_id if canvas_id
   save_settings(updated) unless settings == updated
 
-  [URI.parse(url), canvas_id]
+  URI.parse(url)
 end
 
-URI_OBJECT, CANVAS_ID = resolve_settings(url_arg, canvas_id_arg)
+URI_OBJECT = resolve_url(url_arg)
 HOST = URI_OBJECT.host
 PORT = URI_OBJECT.port || ((URI_OBJECT.scheme == "https") ? 443 : 80)
 USE_SSL = URI_OBJECT.scheme == "https"
@@ -201,8 +197,14 @@ when "logout"
   warn "Removed stored credentials for #{HOST}"
 
 when "list"
-  abort "No canvas_id known — pass --canvas-id=ID at least once" unless CANVAS_ID
-  actions = ok!(get("actions.json?canvas_id=#{CANVAS_ID}"))
+  canvas_id = nil
+  OptionParser.new do |o|
+    o.on("--canvas-id ID") { |v| canvas_id = v }
+  end.parse!(ARGV)
+
+  abort "--canvas-id is required" unless canvas_id
+
+  actions = ok!(get("actions.json?canvas_id=#{canvas_id}"))
   puts JSON.generate(actions)
 
 when "statuses"
@@ -210,9 +212,9 @@ when "statuses"
   puts JSON.generate(statuses)
 
 when "create"
-  abort "No canvas_id known — pass --canvas-id=ID at least once" unless CANVAS_ID
-  opts = {canvas_id: CANVAS_ID, list: "todo"}
+  opts = {list: "todo"}
   OptionParser.new do |o|
+    o.on("--canvas-id ID") { |v| opts[:canvas_id] = v }
     o.on("--title TITLE") { |v| opts[:title] = v }
     o.on("--description TEXT") { |v| opts[:description] = v }
     o.on("--strategy-id ID") { |v| opts[:strategy_id] = v }
@@ -223,6 +225,7 @@ when "create"
     o.on("--labels LABELS") { |v| opts[:label_ids] = v.split(",") }
   end.parse!(ARGV)
 
+  abort "--canvas-id is required" unless opts[:canvas_id]
   abort "--title is required" unless opts[:title]
 
   body = {canvas: {id: opts[:canvas_id]}, title: opts[:title]}
@@ -293,14 +296,14 @@ when "comment-update"
 else
   abort <<~USAGE
     Usage:
-      ogsm-actions [--url=URL] [--canvas-id=ID] COMMAND [options]
+      ogsm-actions [--url=URL] COMMAND [options]
 
     Commands:
       login
       logout
-      list
+      list --canvas-id ID
       statuses
-      create --title TITLE [--description TEXT] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
+      create --canvas-id ID --title TITLE [--description TEXT] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
       update ACTION_ID [--title TITLE] [--description TEXT] [--due DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
@@ -312,7 +315,7 @@ else
       comment-update ACTION_ID COMMENT_ID --content CONTENT
 
     --url accepts a hostname (assumes HTTPS) or a full URL such as http://localhost:8350.
-    On first use, pass --url (and --canvas-id if needed); both are persisted to
+    On first use, pass --url; it is persisted to
     $XDG_CONFIG_HOME/ogsm-online/settings.json. Credentials live alongside in
     credentials.json (mode 0600); set OGSM_TOKEN to override the stored token.
   USAGE
