@@ -97,7 +97,7 @@ end
 
 def http_request(method_class, path, body: nil, token: stored_token)
   Net::HTTP.start(HOST, PORT, use_ssl: USE_SSL) do |http|
-    req = method_class.new("/api/v2/#{path}")
+    req = method_class.new("/api/v3/#{path}")
     req["Authorization"] = "Bearer #{token}" if token
     if body
       req.content_type = "application/json"
@@ -130,6 +130,18 @@ def ok!(res)
     abort "Error #{res.code}: #{res.body}"
   end
   JSON.parse(res.body)
+end
+
+def get_all(path)
+  separator = path.include?("?") ? "&" : "?"
+  records = []
+  page = 1
+  while page
+    body = ok!(get("#{path}#{separator}page=#{page}"))
+    records.concat(body["data"])
+    page = body.dig("meta", "next_page")
+  end
+  records
 end
 
 # --- Login ----------------------------------------------------------------
@@ -204,11 +216,11 @@ when "list"
 
   abort "--canvas-id is required" unless canvas_id
 
-  actions = ok!(get("actions.json?canvas_id=#{canvas_id}"))
+  actions = get_all("actions.json?canvas_id=#{canvas_id}")
   puts JSON.generate(actions)
 
 when "statuses"
-  statuses = ok!(get("statuses.json"))
+  statuses = get_all("statuses.json")
   puts JSON.generate(statuses)
 
 when "create"
@@ -265,7 +277,7 @@ when "update"
 
 when "comments"
   action_id = ARGV.shift or abort "Usage: ogsm-actions comments ACTION_ID"
-  comments = ok!(get("actions/#{action_id}/comments.json"))
+  comments = get_all("actions/#{action_id}/comments.json")
   puts JSON.generate(comments)
 
 when "comment-create"
