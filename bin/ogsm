@@ -8,6 +8,11 @@ require "uri"
 require "io/console"
 require "fileutils"
 
+# Agents often run under a C/POSIX locale, where ARGV arrives as binary and
+# JSON.generate rejects any non-ASCII text.
+Encoding.default_external = Encoding::UTF_8
+ARGV.map! { |arg| arg.dup.force_encoding(Encoding::UTF_8) }
+
 # --- Paths ----------------------------------------------------------------
 
 CONFIG_DIR = File.join(ENV["XDG_CONFIG_HOME"] || File.join(Dir.home, ".config"), "ogsm-online")
@@ -250,7 +255,7 @@ when "create"
   body[:label_ids] = opts[:label_ids] if opts[:label_ids]
 
   action = ok!(post("actions.json", {ogsm_action: body}))
-  puts "Created #{action["id"]}: #{action["title"]}"
+  puts JSON.generate(action)
 
 when "update"
   action_id = ARGV.shift or abort "Usage: ogsm-actions update ACTION_ID [options]"
@@ -273,7 +278,7 @@ when "update"
   body[:label_ids] = opts[:label_ids] if opts[:label_ids]
 
   action = ok!(patch("actions/#{action_id}.json", {ogsm_action: body}))
-  puts "Updated #{action["id"]}: #{action["title"]}"
+  puts JSON.generate(action)
 
 when "comments"
   action_id = ARGV.shift or abort "Usage: ogsm-actions comments ACTION_ID"
@@ -290,7 +295,7 @@ when "comment-create"
   abort "--content is required" unless opts[:content]
 
   comment = ok!(post("actions/#{action_id}/comments.json", {comment: {content: opts[:content]}}))
-  puts "Created #{comment["id"]}: #{comment["content"]}"
+  puts JSON.generate(comment)
 
 when "comment-update"
   action_id = ARGV.shift or abort "Usage: ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT"
@@ -303,7 +308,7 @@ when "comment-update"
   abort "--content is required" unless opts[:content]
 
   comment = ok!(patch("actions/#{action_id}/comments/#{comment_id}.json", {comment: {content: opts[:content]}}))
-  puts "Updated #{comment["id"]}: #{comment["content"]}"
+  puts JSON.generate(comment)
 
 else
   abort <<~USAGE
