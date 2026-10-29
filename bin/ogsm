@@ -48,9 +48,11 @@ def normalise_url(value)
 end
 
 def resolve_url(url_arg)
+  return URI.parse(normalise_url(ENV["OGSM_URL"])) if url_arg.nil? && ENV["OGSM_URL"]
+
   settings = load_settings
   url = url_arg ? normalise_url(url_arg) : settings["url"]
-  abort "No url known — pass --url=tenant.ogsm.online at least once" if url.nil?
+  abort "No url known — pass --url=tenant.ogsm.online at least once, or set OGSM_URL" if url.nil?
 
   updated = {"url" => url}
   save_settings(updated) unless settings == updated
@@ -165,6 +167,7 @@ end
 
 def ensure_token!
   return if stored_token
+  abort "Not logged in to #{HOST} — run `ogsm login` in a terminal, or set OGSM_TOKEN" unless $stdin.tty?
 
   warn "Logging in to #{HOST}"
   email = prompt("Email: ")
@@ -258,7 +261,7 @@ when "create"
   puts JSON.generate(action)
 
 when "update"
-  action_id = ARGV.shift or abort "Usage: ogsm-actions update ACTION_ID [options]"
+  action_id = ARGV.shift or abort "Usage: ogsm update ACTION_ID [options]"
   opts = {}
   OptionParser.new do |o|
     o.on("--title TITLE") { |v| opts[:title] = v }
@@ -281,12 +284,12 @@ when "update"
   puts JSON.generate(action)
 
 when "comments"
-  action_id = ARGV.shift or abort "Usage: ogsm-actions comments ACTION_ID"
+  action_id = ARGV.shift or abort "Usage: ogsm comments ACTION_ID"
   comments = get_all("actions/#{action_id}/comments.json")
   puts JSON.generate(comments)
 
 when "comment-create"
-  action_id = ARGV.shift or abort "Usage: ogsm-actions comment-create ACTION_ID --content CONTENT"
+  action_id = ARGV.shift or abort "Usage: ogsm comment-create ACTION_ID --content CONTENT"
   opts = {}
   OptionParser.new do |o|
     o.on("--content CONTENT") { |v| opts[:content] = v }
@@ -298,8 +301,8 @@ when "comment-create"
   puts JSON.generate(comment)
 
 when "comment-update"
-  action_id = ARGV.shift or abort "Usage: ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT"
-  comment_id = ARGV.shift or abort "Usage: ogsm-actions comment-update ACTION_ID COMMENT_ID --content CONTENT"
+  action_id = ARGV.shift or abort "Usage: ogsm comment-update ACTION_ID COMMENT_ID --content CONTENT"
+  comment_id = ARGV.shift or abort "Usage: ogsm comment-update ACTION_ID COMMENT_ID --content CONTENT"
   opts = {}
   OptionParser.new do |o|
     o.on("--content CONTENT") { |v| opts[:content] = v }
@@ -313,7 +316,7 @@ when "comment-update"
 else
   abort <<~USAGE
     Usage:
-      ogsm-actions [--url=URL] COMMAND [options]
+      ogsm [--url=URL] COMMAND [options]
 
     Commands:
       login
@@ -334,6 +337,7 @@ else
     --url accepts a hostname (assumes HTTPS) or a full URL such as http://localhost:8350.
     On first use, pass --url; it is persisted to
     $XDG_CONFIG_HOME/ogsm-online/settings.json. Credentials live alongside in
-    credentials.json (mode 0600); set OGSM_TOKEN to override the stored token.
+    credentials.json (mode 0600). Set OGSM_URL and OGSM_TOKEN to use neither file,
+    for example in CI or a cloud session.
   USAGE
 end
