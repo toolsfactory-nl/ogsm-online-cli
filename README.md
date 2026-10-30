@@ -40,16 +40,31 @@ Every command prints JSON.
 ```bash
 ogsm list --canvas-id ID
 ogsm statuses
-ogsm create --canvas-id ID --title TITLE [--description TEXT] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS] [--assignee USER_ID] [--labels "name1,name2"]
-ogsm update ACTION_ID [--title TITLE] [--description TEXT] [--due DATE] [--list STATUS] [--assignee USER_ID] [--labels "name1,name2"]
+ogsm create --canvas-id ID --title TITLE [--description TEXT | --description-file PATH] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS] [--assignee USER_ID] [--labels "name1,name2"]
+ogsm update ACTION_ID [--title TITLE] [--description TEXT | --description-file PATH] [--due DATE] [--list STATUS] [--assignee USER_ID] [--labels "name1,name2"]
 ogsm comments ACTION_ID
-ogsm comment-create ACTION_ID --content CONTENT
-ogsm comment-update ACTION_ID COMMENT_ID --content CONTENT
+ogsm comment-create ACTION_ID (--content CONTENT | --content-file PATH)
+ogsm comment-update ACTION_ID COMMENT_ID (--content CONTENT | --content-file PATH)
 ogsm logout
 ```
 
 `--list` takes a status id, a status name or a base list key (`backlog`,
 `todo`, `doing`, `done`); `ogsm statuses` shows the statuses your tenant uses.
+
+## Images
+
+Descriptions and comments are HTML. To embed an image, give an `<img>` a
+base64 data URI as its `src`; OGSM.online stores it as an attachment. PNG,
+JPEG, GIF, WebP and HEIC are accepted, up to 10 MB each and 10 per request.
+An optional `data-filename` attribute names the file.
+
+Such markup quickly outgrows a command line argument, so read it from a file
+with `--description-file` or `--content-file`, or from stdin by passing `-`:
+
+```bash
+{ printf '<p>The new dashboard:</p><img src="data:image/png;base64,'; base64 < shot.png | tr -d '\n'; printf '">'; } |
+  ogsm comment-create 123 --content-file -
+```
 
 ## License
 

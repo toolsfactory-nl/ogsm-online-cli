@@ -139,6 +139,14 @@ def ok!(res)
   JSON.parse(res.body)
 end
 
+# Long markup, such as an embedded base64 image, does not fit in a single argument.
+def read_text(path)
+  text = (path == "-") ? $stdin.read : File.read(path)
+  text.force_encoding(Encoding::UTF_8)
+rescue SystemCallError => e
+  abort e.message
+end
+
 def get_all(path)
   separator = path.include?("?") ? "&" : "?"
   records = []
@@ -237,6 +245,7 @@ when "create"
     o.on("--canvas-id ID") { |v| opts[:canvas_id] = v }
     o.on("--title TITLE") { |v| opts[:title] = v }
     o.on("--description TEXT") { |v| opts[:description] = v }
+    o.on("--description-file PATH") { |v| opts[:description] = read_text(v) }
     o.on("--strategy-id ID") { |v| opts[:strategy_id] = v }
     o.on("--due DATE") { |v| opts[:due] = v }
     o.on("--start DATE") { |v| opts[:start] = v }
@@ -266,6 +275,7 @@ when "update"
   OptionParser.new do |o|
     o.on("--title TITLE") { |v| opts[:title] = v }
     o.on("--description TEXT") { |v| opts[:description] = v }
+    o.on("--description-file PATH") { |v| opts[:description] = read_text(v) }
     o.on("--due DATE") { |v| opts[:due] = v }
     o.on("--list STATUS") { |v| opts[:list] = v }
     o.on("--assignee USER_ID") { |v| opts[:assignee_id] = v }
@@ -293,9 +303,10 @@ when "comment-create"
   opts = {}
   OptionParser.new do |o|
     o.on("--content CONTENT") { |v| opts[:content] = v }
+    o.on("--content-file PATH") { |v| opts[:content] = read_text(v) }
   end.parse!(ARGV)
 
-  abort "--content is required" unless opts[:content]
+  abort "--content or --content-file is required" unless opts[:content]
 
   comment = ok!(post("actions/#{action_id}/comments.json", {comment: {content: opts[:content]}}))
   puts JSON.generate(comment)
@@ -306,9 +317,10 @@ when "comment-update"
   opts = {}
   OptionParser.new do |o|
     o.on("--content CONTENT") { |v| opts[:content] = v }
+    o.on("--content-file PATH") { |v| opts[:content] = read_text(v) }
   end.parse!(ARGV)
 
-  abort "--content is required" unless opts[:content]
+  abort "--content or --content-file is required" unless opts[:content]
 
   comment = ok!(patch("actions/#{action_id}/comments/#{comment_id}.json", {comment: {content: opts[:content]}}))
   puts JSON.generate(comment)
@@ -323,16 +335,20 @@ else
       logout
       list --canvas-id ID
       statuses
-      create --canvas-id ID --title TITLE [--description TEXT] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
+      create --canvas-id ID --title TITLE [--description TEXT | --description-file PATH] [--strategy-id ID] [--due DATE] [--start DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
-      update ACTION_ID [--title TITLE] [--description TEXT] [--due DATE] [--list STATUS]
+      update ACTION_ID [--title TITLE] [--description TEXT | --description-file PATH] [--due DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
 
     --list takes a status id, name or base list key ("backlog", "todo", "doing", "done");
     run "statuses" to see the statuses this environment uses.
       comments ACTION_ID
-      comment-create ACTION_ID --content CONTENT
-      comment-update ACTION_ID COMMENT_ID --content CONTENT
+      comment-create ACTION_ID (--content CONTENT | --content-file PATH)
+      comment-update ACTION_ID COMMENT_ID (--content CONTENT | --content-file PATH)
+
+    --description-file and --content-file read the text from a file, or from stdin when PATH is "-".
+    Descriptions and comments are HTML; an <img> with a base64 data URI as its src is stored as an
+    attachment.
 
     --url accepts a hostname (assumes HTTPS) or a full URL such as http://localhost:8350.
     On first use, pass --url; it is persisted to
