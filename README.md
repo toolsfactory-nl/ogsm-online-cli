@@ -45,8 +45,12 @@ ogsm update ACTION_ID [--title TITLE] [--description TEXT | --description-file P
 ogsm comments ACTION_ID
 ogsm comment-create ACTION_ID (--content CONTENT | --content-file PATH)
 ogsm comment-update ACTION_ID COMMENT_ID (--content CONTENT | --content-file PATH)
+ogsm comment-delete ACTION_ID COMMENT_ID
 ogsm logout
 ```
+
+`comment-delete` only removes your own comments; it prints
+`{"deleted": COMMENT_ID}`.
 
 `--list` takes a status id, a status name or a base list key (`backlog`,
 `todo`, `doing`, `done`); `ogsm statuses` shows the statuses your tenant uses.
