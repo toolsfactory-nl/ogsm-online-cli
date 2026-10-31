@@ -132,6 +132,8 @@ def post(path, body) = request(Net::HTTP::Post, path, body:)
 
 def patch(path, body) = request(Net::HTTP::Patch, path, body:)
 
+def delete(path) = request(Net::HTTP::Delete, path)
+
 def ok!(res)
   unless res.is_a?(Net::HTTPSuccess)
     abort "Error #{res.code}: #{res.body}"
@@ -325,6 +327,18 @@ when "comment-update"
   comment = ok!(patch("actions/#{action_id}/comments/#{comment_id}.json", {comment: {content: opts[:content]}}))
   puts JSON.generate(comment)
 
+when "comment-delete"
+  action_id = ARGV.shift or abort "Usage: ogsm comment-delete ACTION_ID COMMENT_ID"
+  comment_id = ARGV.shift or abort "Usage: ogsm comment-delete ACTION_ID COMMENT_ID"
+
+  # A successful delete answers 204 No Content, which ok! cannot parse.
+  res = delete("actions/#{action_id}/comments/#{comment_id}.json")
+  if res.is_a?(Net::HTTPSuccess) && res.body.to_s.strip.empty?
+    puts JSON.generate({deleted: comment_id.to_i})
+  else
+    puts JSON.generate(ok!(res))
+  end
+
 else
   abort <<~USAGE
     Usage:
@@ -345,6 +359,7 @@ else
       comments ACTION_ID
       comment-create ACTION_ID (--content CONTENT | --content-file PATH)
       comment-update ACTION_ID COMMENT_ID (--content CONTENT | --content-file PATH)
+      comment-delete ACTION_ID COMMENT_ID
 
     --description-file and --content-file read the text from a file, or from stdin when PATH is "-".
     Descriptions and comments are HTML; an <img> with a base64 data URI as its src is stored as an
