@@ -102,8 +102,18 @@ end
 
 # --- HTTP layer -----------------------------------------------------------
 
+# Net::HTTP's own :ENV lookup only reads http_proxy, also for HTTPS hosts, so cloud sessions
+# that only set https_proxy/HTTPS_PROXY could not connect. URI#find_proxy honours no_proxy.
+def proxy_args
+  proxy = URI::Generic.build(scheme: USE_SSL ? "https" : "http", host: HOST, port: PORT).find_proxy
+  return [:ENV] unless proxy
+
+  unescape = ->(value) { value && URI.decode_www_form_component(value) }
+  [proxy.host, proxy.port, unescape.(proxy.user), unescape.(proxy.password)]
+end
+
 def http_request(method_class, path, body: nil, token: stored_token)
-  Net::HTTP.start(HOST, PORT, use_ssl: USE_SSL) do |http|
+  Net::HTTP.start(HOST, PORT, *proxy_args, use_ssl: USE_SSL) do |http|
     req = method_class.new("/api/v3/#{path}")
     req["Authorization"] = "Bearer #{token}" if token
     if body
