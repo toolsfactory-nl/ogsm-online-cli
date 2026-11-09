@@ -127,13 +127,28 @@ end
 def request(method_class, path, body: nil)
   ensure_token!
   res = http_request(method_class, path, body: body)
-  if res.code.to_i == 401
-    warn "Authentication failed; logging in again."
-    clear_token
-    ensure_token!
-    res = http_request(method_class, path, body: body)
-  end
+  abort_on_auth_error!(res)
   res
+end
+
+def abort_on_auth_error!(res)
+  case res.code.to_i
+  when 401
+    source = ENV["OGSM_TOKEN"] ? "OGSM_TOKEN" : "the stored token"
+    abort <<~MESSAGE
+      #{HOST} refused #{source}: it is revoked, expired or not a personal API token.
+      #{create_token_hint}, then run `ogsm login` or set OGSM_TOKEN to it.
+    MESSAGE
+  when 403
+    error = (begin
+      JSON.parse(res.body)["error"]
+    rescue
+      nil
+    end)
+    if error == "read_only_token"
+      abort "This personal API token is read only. #{create_token_hint} with read and write access."
+    end
+  end
 end
 
 def get(path) = request(Net::HTTP::Get, path)
@@ -173,9 +188,8 @@ end
 
 # --- Login ----------------------------------------------------------------
 
-def prompt(label)
-  $stderr.print(label)
-  $stdin.gets&.chomp
+def create_token_hint
+  "Create a personal API token under My settings on #{URI_OBJECT}/my_settings/account"
 end
 
 def prompt_secret(label)
@@ -187,39 +201,30 @@ end
 
 def ensure_token!
   return if stored_token
-  abort "Not logged in to #{HOST} — run `ogsm login` in a terminal, or set OGSM_TOKEN" unless $stdin.tty?
 
-  warn "Logging in to #{HOST}"
-  email = prompt("Email: ")
-  password = prompt_secret("Password: ")
-  abort "Email and password are required" if email.to_s.empty? || password.to_s.empty?
+  abort "Not logged in to #{HOST}. #{create_token_hint}, then run `ogsm login` or set OGSM_TOKEN to it."
+end
 
-  body = {email_address: email, password: password}
-  loop do
-    res = http_request(Net::HTTP::Post, "session.json", body: body, token: nil)
-    case res.code.to_i
-    when 200
-      data = JSON.parse(res.body)
-      store_token(data["token"])
-      warn "Logged in as #{data.dig("user", "email_address")}"
-      return
-    when 401
-      reason = (begin
-        JSON.parse(res.body)["error"]
-      rescue
-        nil
-      end)
-      if reason == "otp_required"
-        body[:otp] = prompt("OTP code: ")
-        next
-      end
-      abort "Login failed: invalid credentials"
-    when 429
-      abort "Login failed: rate limited"
-    else
-      abort "Login failed (#{res.code}): #{res.body}"
-    end
+# The token comes from --token, a pipe or a hidden prompt, so it stays out of the shell history.
+def login(token_arg)
+  token = token_arg
+  token ||= if $stdin.tty?
+    warn create_token_hint
+    prompt_secret("Personal API token: ")
+  else
+    $stdin.read
   end
+  token = token.to_s.strip
+  abort "A personal API token is required" if token.empty?
+
+  res = http_request(Net::HTTP::Get, "statuses.json", token: token)
+  if res.code.to_i == 401
+    abort "#{HOST} refused this token: it is revoked, expired or not a personal API token. #{create_token_hint}."
+  end
+  ok!(res)
+
+  store_token(token)
+  warn "Logged in to #{HOST}"
 end
 
 # --- Commands -------------------------------------------------------------
@@ -229,8 +234,14 @@ command = ARGV.shift
 case command
 
 when "login"
-  clear_token
-  ensure_token!
+  abort "OGSM_TOKEN is set, so `ogsm login` would not be used; unset it first" if ENV["OGSM_TOKEN"]
+
+  token_arg = nil
+  OptionParser.new do |o|
+    o.on("--token TOKEN") { |v| token_arg = v }
+  end.parse!(ARGV)
+
+  login(token_arg)
 
 when "logout"
   clear_token
@@ -355,7 +366,7 @@ else
       ogsm [--url=URL] COMMAND [options]
 
     Commands:
-      login
+      login [--token TOKEN]
       logout
       list --canvas-id ID
       statuses
@@ -374,6 +385,9 @@ else
     --description-file and --content-file read the text from a file, or from stdin when PATH is "-".
     Descriptions and comments are HTML; an <img> with a base64 data URI as its src is stored as an
     attachment.
+
+    login takes a personal API token, created under My settings in OGSM.online, from --token,
+    from stdin or from a hidden prompt. A read only token can list but not change anything.
 
     --url accepts a hostname (assumes HTTPS) or a full URL such as http://localhost:8350.
     On first use, pass --url; it is persisted to
