@@ -58,9 +58,30 @@ ogsm comments ACTION_ID
 ogsm comment-create ACTION_ID (--content CONTENT | --content-file PATH)
 ogsm comment-update ACTION_ID COMMENT_ID (--content CONTENT | --content-file PATH)
 ogsm comment-delete ACTION_ID COMMENT_ID
+ogsm objective-create --canvas-id ID --title TITLE [card options]
+ogsm objective-update OBJECTIVE_ID [--title TITLE] [card options]
+ogsm goal-create --canvas-id ID --title TITLE [--parent-id GOAL_ID] [card options] [measure options]
+ogsm goal-update GOAL_ID [--title TITLE] [card options] [measure options]
+ogsm strategy-create --canvas-id ID --title TITLE [card options]
+ogsm strategy-update STRATEGY_ID [--title TITLE] [card options]
+ogsm indicator-create --canvas-id ID --title TITLE --parent-id STRATEGY_OR_INDICATOR_ID [card options] [measure options]
+ogsm indicator-update INDICATOR_ID [--title TITLE] [card options] [measure options]
 ogsm login [--token TOKEN]
 ogsm logout
 ```
+
+Card options are `--description TEXT | --description-file PATH`,
+`--assignee USER_ID` and `--labels "name1,name2"`. Measure options are
+`--target-unit UNIT`, `--chart-vertical-min NUMBER`, `--aggregation-method
+METHOD` (`sum`, `average`, `min`, `max`, `median`, `none`, `sum_per_quarter`,
+`average_per_quarter`, `sum_per_year`, `average_per_year`) and `--chart-type
+TYPE` (`individual`, `quarter_average`, `quarter_sum`, `year_average`,
+`year_sum`).
+
+Objectives and strategies have no parent. A goal can sit under another goal
+on the same canvas, and a sub goal inherits its target unit. An indicator
+sits under a strategy or another indicator. The update commands only change
+fields; they do not move a card to another parent.
 
 `comment-delete` only removes your own comments; it prints
 `{"deleted": COMMENT_ID}`.

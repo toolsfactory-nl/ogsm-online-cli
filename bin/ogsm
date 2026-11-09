@@ -217,9 +217,69 @@ def login(token_arg)
   warn "Logged in to #{HOST}"
 end
 
+# --- Cards ----------------------------------------------------------------
+
+# Goals and indicators carry measurements; objectives and strategies stand on the OGSM without a parent.
+CARD_KINDS = {
+  "objective" => {path: "objectives", parent: false, measures: false},
+  "goal" => {path: "goals", parent: true, measures: true},
+  "strategy" => {path: "strategies", parent: false, measures: false},
+  "indicator" => {path: "indicators", parent: true, measures: true}
+}.freeze
+
+def card_options(kind, opts, create:)
+  config = CARD_KINDS.fetch(kind)
+  OptionParser.new do |o|
+    if create
+      o.on("--canvas-id ID") { |v| opts[:canvas_id] = v }
+      o.on("--parent-id ID") { |v| opts[:parent_id] = v } if config[:parent]
+    end
+    o.on("--title TITLE") { |v| opts[:title] = v }
+    o.on("--description TEXT") { |v| opts[:description] = v }
+    o.on("--description-file PATH") { |v| opts[:description] = read_text(v) }
+    o.on("--assignee USER_ID") { |v| opts[:assignee_id] = v }
+    o.on("--labels LABELS") { |v| opts[:label_ids] = v.split(",") }
+    if config[:measures]
+      o.on("--target-unit UNIT") { |v| opts[:target_unit] = v }
+      o.on("--chart-vertical-min NUMBER") { |v| opts[:chart_vertical_min] = v }
+      o.on("--aggregation-method METHOD") { |v| opts[:aggregation_method] = v }
+      o.on("--chart-type TYPE") { |v| opts[:chart_type] = v }
+    end
+  end.parse!(ARGV)
+end
+
+def card_body(opts)
+  body = opts.slice(:title, :description, :assignee_id, :label_ids, :target_unit, :chart_vertical_min,
+    :aggregation_method, :chart_type)
+  body[:canvas] = {id: opts[:canvas_id]} if opts[:canvas_id]
+  body[:parent] = {id: opts[:parent_id]} if opts[:parent_id]
+  body
+end
+
 # --- Commands -------------------------------------------------------------
 
 command = ARGV.shift
+
+if (match = command.to_s.match(/\A(objective|goal|strategy|indicator)-(create|update)\z/))
+  kind, verb = match.captures
+  path = CARD_KINDS.fetch(kind)[:path]
+  opts = {}
+
+  if verb == "create"
+    card_options(kind, opts, create: true)
+    abort "--canvas-id is required" unless opts[:canvas_id]
+    abort "--title is required" unless opts[:title]
+    abort "--parent-id is required" if kind == "indicator" && !opts[:parent_id]
+
+    card = ok!(post("#{path}.json", {"ogsm_#{kind}" => card_body(opts)}))
+  else
+    card_id = ARGV.shift or abort "Usage: ogsm #{kind}-update #{kind.upcase}_ID [options]"
+    card_options(kind, opts, create: false)
+    card = ok!(patch("#{path}/#{card_id}.json", {"ogsm_#{kind}" => card_body(opts)}))
+  end
+  puts JSON.generate(card)
+  exit
+end
 
 case command
 
@@ -365,12 +425,31 @@ else
       update ACTION_ID [--title TITLE] [--description TEXT | --description-file PATH] [--due DATE] [--list STATUS]
              [--assignee USER_ID] [--labels "name1,name2"]
 
-    --list takes a status id, name or base list key ("backlog", "todo", "doing", "done");
-    run "statuses" to see the statuses this environment uses.
       comments ACTION_ID
       comment-create ACTION_ID (--content CONTENT | --content-file PATH)
       comment-update ACTION_ID COMMENT_ID (--content CONTENT | --content-file PATH)
       comment-delete ACTION_ID COMMENT_ID
+      objective-create --canvas-id ID --title TITLE [card options]
+      objective-update OBJECTIVE_ID [--title TITLE] [card options]
+      goal-create --canvas-id ID --title TITLE [--parent-id GOAL_ID] [card options] [measure options]
+      goal-update GOAL_ID [--title TITLE] [card options] [measure options]
+      strategy-create --canvas-id ID --title TITLE [card options]
+      strategy-update STRATEGY_ID [--title TITLE] [card options]
+      indicator-create --canvas-id ID --title TITLE --parent-id STRATEGY_OR_INDICATOR_ID [card options] [measure options]
+      indicator-update INDICATOR_ID [--title TITLE] [card options] [measure options]
+
+    card options:    [--description TEXT | --description-file PATH] [--assignee USER_ID] [--labels "name1,name2"]
+    measure options: [--target-unit UNIT] [--chart-vertical-min NUMBER] [--aggregation-method METHOD]
+                     [--chart-type TYPE]
+
+    --list takes a status id, name or base list key ("backlog", "todo", "doing", "done");
+    run "statuses" to see the statuses this environment uses.
+
+    Objectives and strategies stand on the OGSM itself. A goal may sit under another goal; an indicator
+    sits under a strategy or another indicator. --aggregation-method is one of sum, average, min, max,
+    median, none, sum_per_quarter, average_per_quarter, sum_per_year or average_per_year; --chart-type is
+    one of individual, quarter_average, quarter_sum, year_average or year_sum. A card cannot be moved to
+    another parent through update.
 
     --description-file and --content-file read the text from a file, or from stdin when PATH is "-".
     Descriptions and comments are HTML; an <img> with a base64 data URI as its src is stored as an
